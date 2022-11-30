@@ -1,0 +1,404 @@
+---
+title: "Report 1"
+author: "Hannah Lee, Khyati Jariwala, Michelle Xu"
+date: "2022-10-21"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE,  
+                      warning = FALSE, message = FALSE, 
+                      fig.align = "center",
+                      R.options = list(max.print=100))
+```
+
+## Introduction
+
+This city of Seattle probably makes you think about a few things:
+Starbucks, rainy weather, and popular tourist attractions, like the
+Space Needle. This prompted us to explore what more we can uncover about
+Seattle using seemingly unrelated datasets regarding weather, collisions, and
+population metrics to examine potential relationships between these
+variables.
+
+The datasets we will be using are
+`Observed Monthly Rain Gauge Accumulations - Oct 2002 to May 2017`,
+which records monthly accumulations of rain gauges located throughout
+Seattle city limits, the `SDOT Collisions - All Years`, which records
+the number of collisions in Seattle (provided by SPD and recorded by
+Traffic Records), and the `City Annual Stats`, which includes the total
+population (and change in population), housing, and jobs for the City of
+Seattle for each calendar year. These datasets were retrieved from
+[*data-seattlecitygis.opendata.arcgis.com*]{.underline} and
+[*data.seattle.gov*]{.underline}, which are the city government's open
+access databases
+
+These datasets are of interest to us, because we want to examine whether
+seemingly different variables, such as the weather, collisions, and
+population metrics can have potential relationships with each other. For
+the purpose of simplicity, we have selected these metrics and data for
+the city of Seattle rather than a whole country.
+
+Unique rows in the
+`Observed Monthly Rain Gauge Accumulations - Oct 2002 to May 2017`
+dataset represent a monthly measurement of the rainwater accumulated in
+millimeters across various rain gauges located in Seattle. In the
+`SDOT Collisions - All Years` dataset, unique rows represent a detailed
+report of a collision occurring in Seattle with information about the
+number of people involved, the location of the collision, the severity
+of the collision, and other relevant information. For the
+`City Annual Stats` dataset, the unique rows are representative of
+annual population, housing, job, and industry data for the city of
+Seattle.
+
+These datasets will be reshaped and tidied individually first, and then
+joined by the variable *Year*, which is the common key between all of
+our datasets. Since two datasets contain month and day data, those will
+be joined by the *Month*, *Day*, and *Year* keys prior to being joined
+with the City Annual Stats dataset, which only has the *Year* key. All
+datasets are predominantly numeric (rainfall, population, jobs, etc.);
+however, there are a few categorical variables interspersed (year,
+collision severity, etc.).
+
+A potential trend we expect to see once we combine the datasets is that
+the number of collisions should increase as the average rainfall
+increases. This is because rain causes roads to be slippery, which could
+result in collisions. Additionally, the more rainfall there is, the
+severity of the collision should also increase for the same reason. For
+population and collisions, we expect that with an increasing population
+the number of collisions would increase, because there would be more
+people on the road. Within the City Annual Stats dataset, we expect to
+see that the number of jobs will increase as the total population
+increases due to the fact that people are attracted to live in cities
+with more job opportunities, because people need to be able to make a
+living.
+
+## Tidying
+
+```{r, output=F}
+# Load libraries
+library(tidyverse)
+
+# Read in datasets
+collisions <- read.csv("~/Collisions.csv") %>% as.data.frame()
+citystats <- read.csv("~/City_Annual_Stats.csv") %>% as.data.frame()
+rainfall <- read.csv("~/Observed_Monthly_Rain_Gauge_Accumulations_-_Oct_2002_to_May_2017.csv") %>% as.data.frame()
+
+# viewing datasets
+collisions %>% head()
+citystats %>% head()
+rainfall %>% head()
+```
+
+```{r}
+# Tidying "Collisions" dataset
+collisions %>%
+  group_by(INCDTTM, COLLISIONTYPE, SEVERITYDESC, WEATHER, VEHCOUNT) %>% # there are columns we wanted to keep 
+  summarise(n = n()) %>% # we reduced this exceedingly large dataset by transforming it around a different ID variable -- Date
+  separate(INCDTTM, into = c("Month", "Day", "Year")) %>%
+  mutate_at(c("Year", "Month", "Day"), as.integer) %>% 
+  filter(COLLISIONTYPE != "") %>% 
+  arrange(n) %>% 
+  ungroup() -> collisions_cleaned
+```
+
+```{r}
+# create "working" dataset by keep only useful columns of dataset
+citystats %>%
+  select(-c(City, Year_Display, ObjectID, Change_Population, Change_Housing_Units, Change_Jobs)) -> city_cleaned
+```
+
+```{r}
+# Tidying rainfall dataset
+rainfall %>%
+  pivot_longer(cols = c("RG01":"RG20_25"),
+               names_to = "Gauge_Location",
+               names_transform = as.factor,
+               values_to = "Accumulated_Rainfall",
+               values_transform = as.numeric) %>%
+  separate(Date, into = c("Month", "Day", "Year")) %>%
+  mutate_at(c("Year", "Month", "Day"), as.integer) %>% 
+  group_by(Year, Month) %>% 
+  summarise(Rain_Accum = mean(Accumulated_Rainfall)) %>% 
+  ungroup()-> rain_cleaned # we think its in in
+
+```
+
+To begin, we modified two of our datasets so that they are tidy. For the
+`Observed Monthly Rain Gauge Accumulations - Oct 2002 to May 2017`
+dataset, we created a new variable for *Gauge_Location* and for
+*Accumulated_Rainfall*, which contains the corresponding amount of
+rainfall accumulated for each location. Both the
+`Observed Monthly Rain Gauge Accumulations - Oct 2002 to May 2017` and
+`SDOT Collisions - All Years` datasets provided dates in the format of
+MM/DD/YY. Our goal is to join all of our datasets by year, so we
+separated the given dates into variables for month, day, and year.
+
+## Joining/Merging
+
+The total number of observations and unique IDs in the `citystats`,
+`rain_cleaned` and `collisions_cleaned` datasets are 25;19, 175;3,
+193545;8, respectively. The only ID that all of the datasets have in
+common is *Year*. While both `rain_cleaned` and `collisions_cleaned`
+have a *Month* ID, only `collisions_cleaned` has a *Day* ID. The unique
+IDs that appear in only the `citystats` dataset include *City*,
+*Const_Res*, *FIRE*, *Manufacturing*, *Retail*, *Services*, *WTU*,
+*Government*, *Education*, *Total_Jobs*, *Housing_Units*,
+*Total_Population*, *Households*, *Year_Display*, *Change_Population*,
+*Change_Jobs*, and *ObjectID*. The unique ID that appears only in the
+`rain_cleaned` dataset is *Rain_Accum*. Lastly, the unique IDs that
+appear only in the `collisions_cleaned` dataset are *COLLISIONTYPE*,
+*SEVERITYDESC*, *WEATHER*, *VEHCOUNT*, and *n*. There were no IDs that
+have been left out or any rows that were dropped/added while joining the
+datasets. Note that we removed a few columns that did not seem to
+provide meaningful information (particularly from the `citystats`
+dataset).
+
+```{r}
+# find total number of observations for each dataset and unique IDs
+dim(city_cleaned)
+dim(rain_cleaned)
+dim(collisions_cleaned)
+
+# joining cleaned data sets, where each row now represents a collision incident
+collisions_cleaned %>% 
+  left_join(rain_cleaned, by = c("Year", "Month")) %>% 
+  left_join(city_cleaned, by = "Year") -> city_rain_collisions
+
+# finding dimensions of & viewing joint dataset
+dim(city_rain_collisions)
+city_rain_collisions
+```
+
+## Wrangling
+
+After manipulating our dataset, we were able to compute and analyze
+summary statistics for many of our variables.
+
+```{r}
+# viewing "working" dataset
+city_rain_collisions
+```
+
+```{r}
+# create table of summary statistics for numerical variables, such as rainfall, vehicles in collisions, severity of collisions, jobs/population ratio per year ()
+city_rain_collisions %>%
+  select(Year, Rain_Accum, Total_Population, Total_Jobs, SEVERITYDESC, WEATHER, VEHCOUNT) %>%
+  filter(Year %in% c(2002:2017)) %>%
+  mutate(Ratio_jobs_per_pop = Total_Jobs / Total_Population) %>%
+  ungroup() %>% 
+  na.omit() %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd, min = min, max = max))
+```
+
+For the variable *VEHCOUNT*, the vehicles affected in a collision, has a
+mean of 1.961 vehicles and a standard deviation of 0.589 vehicles. Using
+the mutate dplyr function, we were able to find the ratio of total
+number of jobs to the total population is 0.803 on average with a
+standard deviation of 0.02. For the variable *Rain_Accum*, we found that
+the monthly rain gauge accumulation is 5.3 inches on average with a
+standard deviation of 2.89 inches.
+
+```{r}
+# create frequency tables for collision type and weather (summary statistics for categorical variables)
+city_rain_collisions %>%
+  select(COLLISIONTYPE) %>%
+  group_by(COLLISIONTYPE) %>%
+  summarise(Frequency = n()) %>% 
+  arrange(desc(Frequency))
+
+city_rain_collisions %>%
+  select(WEATHER) %>%
+  group_by(WEATHER) %>%
+  summarise(Frequency = n()) %>% 
+  arrange(desc(Frequency))
+```
+
+Furthermore, we created a frequency table for the two categorical
+variables we were interested in, *COLLISIONTYPE* and *WEATHER*. These
+tables represent the number of collisions observed for each collision
+type and weather condition. In our dataset, we can see that the
+collisions most frequently occurred with parked cars and least
+frequently occurred when it was head-on. Additionally, in our dataset,
+the most collisions occurred when the weather was clear, and the least
+collisions occurred when there was blowing snow.
+
+## Visualizing
+
+```{r}
+# prepare data for visualization
+city_rain_collisions %>% 
+  mutate(Ratio_jobs_per_pop = Total_Jobs / Total_Population) -> df
+```
+
+```{r}
+# rainfall histogram (1 variable)
+df %>%
+  ggplot(aes(x=Rain_Accum)) + 
+  geom_histogram(
+    binwidth = 1, 
+    fill="#c9dad8", 
+    color="#e9ecef", 
+    alpha=0.9) +
+  scale_x_continuous(breaks = seq(0, 12, 2)) +
+  labs(x = "Monthly Rain Gauge Accumulation (in)", y = "Count (Collisions)", title = "Monthly Rain Gauge Accumulation Distribution at Time of Collisions in Seattle") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The *Monthly Rain Gauge Accumulation Distribution at Time of Collisions
+in Seattle* histogram represents the distribution of the (average) rain
+gauge accumulation (inches) throughout the city of Seattle for the month
+of each observation, or row, in our dataset. This histogram is unimodal
+and right-skewed. Since each row in our dataset represents a collision,
+this histogram presents an unexpected trend that as the monthly rain
+gauge accumulation increases, the number of observed/reported collision
+counts decreases.
+
+```{r}
+# vehicle count in collision incidents histogram (1 variable)
+df %>%
+  filter(VEHCOUNT %in% seq(1:4)) %>% 
+  ggplot(aes(x = VEHCOUNT)) +
+  stat_count(geom = "bar") +
+  geom_text(stat='count',
+            aes(label=..count..),
+            vjust = -0.5,
+            size = 2.5) +
+  scale_x_continuous(breaks = seq(1, 4, 1)) +
+  scale_y_continuous(breaks = seq(0, 150000, 25000)) +
+  labs(x = "Number of vehicle(s) in a collision incident", 
+       y = "Count (Collisions)", 
+       title = "Number of Vehicles in Collisions in Seattle") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The *Number of Vehicles Involved in Seattle Collisions* bar graph
+represents the vehicle counts of the collisions of Seattle contained in
+our dataset. Note, we disregarded any vehicle counts in our dataset that
+were less than 1 or greater than 4. Clearly, the bar graph depicts that
+most of the collisions that had occurred affected two vehicles.
+
+```{r}
+# Collisions vs. Day by Severity (2 variables)
+df %>%
+  ggplot(aes(x=Day)) +
+  geom_bar(aes(fill = SEVERITYDESC)) +
+  scale_x_continuous(breaks = seq(1, 31, 2)) +
+  scale_y_continuous(breaks = seq(0, 7000, 1000)) +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(
+    x = "Day of the Month",
+    y = "Count (Collisions)",
+    title = "Severity of Collision Incidents by Day"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The *Severity of Collision Incidents by Day* bar plot represents the
+count (number of collisions) of each day of the month by severity of the
+collision. From the plot, we see that the property damage only
+collisions consistently occur the most over the days in the month.
+Similarly, injury collisions are the second most frequently occurring
+collisions.
+
+```{r}
+# Severity vs Population (2 variables)
+df %>%
+  filter(SEVERITYDESC != "Unknown") %>% 
+  ggplot(aes(x=SEVERITYDESC, y = Total_Population, fill = SEVERITYDESC)) +
+  geom_boxplot(alpha = 0.2) +
+  scale_y_continuous(breaks = seq(500000,800000,25000)) +
+  labs(x = "Severity Description of Collision", 
+       y = "Total Population", 
+       title = "Severity Description of Collision vs Total Population in Seattle") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 25, 
+                                   hjust = 1), 
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+```
+
+The *Severity Description of Collision vs. Total Population in Seattle*
+boxplot represents the total population in Seattle at the time of each
+collision categorized by severity. Note that we excluded collisions that
+had an unknown severity description, as it did not seem to contribute in
+showing how the total population differs among varying collision
+severity. The plot indicates that the total spread of population does
+not clearly differ among different levels of severity descriptions of
+the collision. Thus, the boxplot does not support that a larger
+population indicates a higher number of severe collision occurrences
+compared to milder cases of collisions.
+
+```{r}
+# Jobs vs. Population by Year (3 variables)
+df %>%
+  ggplot(aes(x=Total_Population, y = Total_Jobs)) +
+  geom_point(aes(color = Year)) +
+  scale_color_gradient2(low = "blue", mid = "red", midpoint = 2006) +
+  labs(x = "Total Population", y = "Total Jobs", title = "Total Population vs. Total Jobs in Seattle") +
+  ylim(450000,650000) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The *Total Population vs. Total Jobs in Seattle* scatterplot represents
+the relationship between the total population and total number of jobs
+in Seattle by year. The plot suggests that there may be a positive
+linear relationship between total population and total number of jobs.
+That is, as the total population increases, the total number of jobs do
+as well. Furthermore, both the total population and number of jobs
+increases over the years.
+
+```{r}
+# Population/Housing vs. Year (3 variables)
+library(scales)
+df %>% 
+  select(Year, Total_Population, Housing_Units) %>% 
+  distinct() %>% 
+  pivot_longer(
+    cols = c("Total_Population", "Housing_Units"),
+    names_to = "Category",
+    values_to = "Stat"
+  )  %>% 
+  ggplot(aes(x = Year, y = Stat)) +
+  geom_line(aes(color = Category),
+            stat = "identity",
+            alpha = 0.5,
+            linetype = "longdash") +
+  geom_text(aes(label=Stat,
+                color = Category),
+            stat='identity',
+            angle = -25,
+            vjust = -0.5,
+            size = 2.5) +
+  scale_x_continuous(breaks = seq(2004, 2022, 2)) +
+  scale_y_continuous(labels = label_number(scale = 1e-3)) +
+  labs(
+    x = "Year",
+    y = "Count (in thousands)",
+    title = "Total Population and Housing Unit Trends Over Year") +
+  theme_minimal() +
+  theme( plot.title = element_text(hjust = 0.5) )
+```
+
+The *Total Population and Housing Unit Trends Over Year* plot depicts
+the total population and housing unit counts in Seattle over the years.
+Based on the plot, there is a trend of increasing total population and
+housing units as the years go by. Beyond this, total population and
+housing units seem to increase at very similar rates.
+
+## References
+1) Observed Monthly Rain Gauge Accumulations - Oct 2002 to May 2017: This data source includes monthly accumulations of rain gauges located throughout Seattle city limits. https://data.seattle.gov/City-Business/Observed-Monthly-Rain-Gauge-Accumulations-Oct-2002/rdtp-hzy3 
+2) SDOT Collisions - All Years: This data source includes records of collisions in Seattle (provided by SPD and recorded by Traffic Records). 
+ https://data-seattlecitygis.opendata.arcgis.com/datasets/sdot-collisions-all-years/explore?location=47.614507%2C-122.333041%2C12.33 
+3) City Annual Stats: This dataset includes information of the total population (and change in population), housing, and jobs for the City of Seattle by year. 
+https://data-seattlecitygis.opendata.arcgis.com/datasets/SeattleCityGIS::city-annual-stats-2/explore 
+
+## Acknowledgements
+Khyati Jariwala tidied/joined the original datasets and organized the presentation for our findings. Michelle Xu and Hannah Lee worked on the data wrangling (summary statistics) and the data visualizations. 
